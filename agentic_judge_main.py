@@ -212,6 +212,19 @@ class PlanningEngine:
             - Final score must be **0–5** (not 10).
             - This is a weighted, holistic judgment, **not** a straight average, make it whole number.
 
+            SCORING LOGIC:
+            - Give **5/5 (Excellent)** if:
+                - The majority of criteria are 9–10, AND
+                - None are below 8, AND
+            - There are no critical accuracy or medical safety issues.
+                - Give **4/5 (Good)** if:
+                - One or two criteria are slightly lower (6–8) but others are strong, OR
+                - Quality is high but small non-critical issues exist.
+            - Give **3/5 (Good)** if:
+                - Multiple criteria are moderate (6–7) OR one is low (5 or below) but accuracy is still acceptable.
+            - Give **1–2/5 (Poor)** if:
+                - Major accuracy errors, missing content, or unsafe translations.
+
             - Pair the number with a quality label:
                 - 5 = Excellent
                 - 3–4 = Good
@@ -703,11 +716,11 @@ def main():
 
     # Example translation pair
     source_text = """
-    The nurse inserted the IV incorrectly, causing bruising.
+    The patient was given penicillin to prevent infection.
     """
     
     translation = """
-    Ang nurse ay pinasok ang IV ng mali, kaya nagka-pasa.
+    Ang pasyente ay binigyan ng penicillin upang maiwasan ang impeksyon.
     """
     
     # Evaluate the translation
