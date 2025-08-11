@@ -8,6 +8,8 @@ from agent_tools import TranslationTools
 import textwrap
 import os
 from dotenv import load_dotenv
+import time
+import re
 
 load_dotenv() 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -21,6 +23,8 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger(__name__)
+
+TOTAL_TOKENS_USED = 0  # Global counter
 
 @dataclass
 class EvaluationCriteria:
@@ -75,9 +79,9 @@ class MemoryModule:
 class PlanningEngine:
     """Guides the LLM's evaluation process through structured reasoning"""
     
-    def __init__(self):
+    def __init__(self, memory=None):
+        self.memory = memory
         self.evaluation_steps = [
-            "initial_analysis",
             "accuracy_assessment", 
             "fluency_evaluation",
             "coherence_check",
@@ -85,7 +89,6 @@ class PlanningEngine:
             "guideline_adherence_check",
             "completeness_verification",
             "score_synthesis",
-            "final_reflection"
         ]
 
     
@@ -105,21 +108,11 @@ class PlanningEngine:
 
         
         prompts = {
-            "initial_analysis": f"""
-            Analyze the following translation pair for initial impressions:
-            
-            Source (English): {source_text}
-            Translation (Filipino): {translation}
-            
-            Provide your initial thoughts on the translation quality and identify any immediate concerns.
-            """,
-            
             "accuracy_assessment": f"""
             Evaluate the **accuracy** of the Filipino translation (0–10), focusing on medical precision and meaning preservation.
 
             Source (English): {source_text}
             Translation (Filipino): {translation}
-            {tool_context}
 
 
             Consider:
@@ -169,7 +162,6 @@ class PlanningEngine:
 
             Source (English): {source_text}
             Translation (Filipino): {translation}
-            {tool_context}
 
             Consider:
             - Does the translation respect Filipino cultural norms and sensitivities?
@@ -203,7 +195,6 @@ class PlanningEngine:
 
             Source (English): {source_text}
             Translation (Filipino): {translation}
-            {tool_context}
 
             Consider:
             - Are all ideas, details, and important elements from the source text translated?
@@ -219,7 +210,8 @@ class PlanningEngine:
 
             IMPORTANT:
             - Final score must be **0–5** (not 10).
-            - This is a weighted, holistic judgment, **not** a straight average.
+            - This is a weighted, holistic judgment, **not** a straight average, make it whole number.
+
             - Pair the number with a quality label:
                 - 5 = Excellent
                 - 3–4 = Good
@@ -231,43 +223,81 @@ class PlanningEngine:
             Previous analysis results from temporary memory:
             {self._get_previous_scores_summary(context)}
 
-            Consider the importance of accuracy, medical safety, and domain adherence above all else.  
             Provide the final score in the format: "Score: X/5 - [label]" (e.g., "Score: 4/5 - Good"), followed by reasoning.
-            """,
-
-            "final_reflection": f"""
-            Reflect on your evaluation process for this translation pair.
-
-            Source (English): {source_text}
-            Translation (Filipino): {translation}
-
-            - Are any adjustments needed to your earlier scores?
-            - Did any criterion weigh more heavily due to medical safety concerns?
-            - Provide actionable recommendations for improving the translation if applicable.
             """
-
         }
         return prompts.get(step, f"Analyze the translation pair:\nSource: {source_text}\nTranslation: {translation}")
 
     def _get_previous_scores_summary(self, context: Dict) -> str:
         """Get a summary of previous step scores for synthesis"""
-        memory = getattr(self, 'memory', None)
-        if not memory:
-            return "No previous scores available"
-        
         summary = []
-        criteria_steps = ['accuracy_assessment', 'fluency_evaluation', 'coherence_check', 'cultural_appropriateness_check', 
-                         'guideline_adherence_check', 'completeness_verification']
-        
+
+        criteria_steps = [
+            'accuracy_assessment',
+            'fluency_evaluation',
+            'coherence_check',
+            'cultural_appropriateness_check',
+            'guideline_adherence_check',
+            'completeness_verification'
+        ]
+
         for step in criteria_steps:
-            step_data = memory.get_temporary(step)
-            if step_data and 'result' in step_data:
-                result_text = step_data['result']
+            result_text = None
+
+            # 1. Try memory first
+            if self.memory:
+                step_data = self.memory.get_temporary(step)
+                if step_data and 'result' in step_data:
+                    result_text = step_data['result']
+
+            # 2. Fallback to context
+            if not result_text and step in context:
+                result_text = context[step]
+
+            # 3. Extract score
+            if result_text:
                 score = self._extract_numeric_score(result_text)
-                criterion = step.replace('_assessment', '').replace('_evaluation', '').replace('_check', '').replace('_analysis', '').replace('_verification', '')
-                summary.append(f"{criterion}: {score}/10")
-        
+                if score is not None:
+                    criterion = (
+                        step.replace('_assessment', '')
+                            .replace('_evaluation', '')
+                            .replace('_check', '')
+                            .replace('_analysis', '')
+                            .replace('_verification', '')
+                    )
+                    summary.append(f"{criterion}: {score}/10")
+
         return "; ".join(summary) if summary else "No scores extracted yet"
+
+    def _extract_numeric_score(self, text: str) -> float:
+        """Extract numeric score from text response"""
+        import re
+        
+        # Look for patterns like "8/10", "Score: 7", "8.5 out of 10", etc.
+        patterns = [
+            r'Score:\s*(\d+\.?\d*)/10',
+            r'Score:\s*(\d+\.?\d*)',
+            r'(\d+\.?\d*)/10',
+            r'(\d+\.?\d*)\s*out of 10',
+            r'rate.*?(\d+\.?\d*)',
+            r'scored?\s*(\d+\.?\d*)',
+            r'rating.*?(\d+\.?\d*)',
+            r'(\d+\.?\d*)\s*/\s*10'
+        ]
+        
+        for pattern in patterns:
+            matches = re.findall(pattern, text, re.IGNORECASE)
+            if matches:
+                try:
+                    # Take the first valid score found
+                    for match in matches:
+                        score = float(match)
+                        if 0 <= score <= 10:  # Valid score range
+                            return score
+                except ValueError:
+                    continue
+        
+        return 5.0  # Default score if none found
 
 class AgenticTranslationJudge:
     """Main agentic system orchestrating the translation evaluation"""
@@ -276,7 +306,7 @@ class AgenticTranslationJudge:
         self.client = openai.OpenAI(api_key=api_key)
         self.model = model
         self.memory = MemoryModule()
-        self.planner = PlanningEngine()
+        self.planner = PlanningEngine(self.memory)
         self.tools = TranslationTools()
         self.thought_log = []
         
@@ -289,7 +319,7 @@ class AgenticTranslationJudge:
         Your approach is methodical - you analyze translations step by step, use tools when helpful,
         and reflect on your reasoning before providing final judgments.
         
-        When asked to score something, always provide a clear numeric score in the format "Score: X/10" 
+        When asked to score something, always provide a clear numeric whole number score in the format "Score: X/10" 
         where X is a number between 0 and 10 or 0 and 5 depending on the instruction. Follow this with your detailed reasoning.
         
         You communicate your reasoning clearly and provide constructive feedback for improvement.
@@ -403,6 +433,7 @@ class AgenticTranslationJudge:
 
     def _llm_call(self, prompt: str, system_prompt: Optional[str] = None) -> str:
         """Make a call to the LLM with thought logging"""
+        global TOTAL_TOKENS_USED
         try:
             messages = [
                 {"role": "system", "content": system_prompt or self.system_prompt},
@@ -414,6 +445,11 @@ class AgenticTranslationJudge:
                 messages=messages,
                 temperature=0.3
             )
+
+            usage = response.usage
+            if usage:
+                TOTAL_TOKENS_USED += usage.total_tokens
+                logger.info(f"Tokens used in this call: {usage.total_tokens}")
             
             result = response.choices[0].message.content
             self.thought_log.append(f"LLM Response: {result[:200]}...")
@@ -667,15 +703,17 @@ def main():
 
     # Example translation pair
     source_text = """
-    The patient was given penicillin to prevent infection.
+    The nurse inserted the IV incorrectly, causing bruising.
     """
     
     translation = """
-    Ang pasyente ay binigyan ng penicillin upang maiwasan ang impeksyon.
+    Ang nurse ay pinasok ang IV ng mali, kaya nagka-pasa.
     """
     
     # Evaluate the translation
+    start_time = time.time()
     result = judge.evaluate_translation(source_text, translation)
+    latency = time.time() - start_time
     
     # Print results
     judge.pretty_print_evaluation(result,
@@ -686,6 +724,9 @@ def main():
                               readable_filepath="translation_evaluation.txt")
 
     judge.export_evaluation(result, "translation_evaluation.json")
+
+    print(f"Latency: {latency:.2f} seconds")
+    print(f"Tokens used: {TOTAL_TOKENS_USED}")
 
 if __name__ == "__main__":
     main()

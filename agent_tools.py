@@ -16,8 +16,6 @@ class TranslationTools:
             'language_tool_checker': self._languagetool_checker,
             'medical_term_checker': self._medical_term_checker,
             'semantic_similarity_estimator': self._embedding_based_similarity, 
-
-
         }
     
     def get_available_tools(self) -> List[str]:

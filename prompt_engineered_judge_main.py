@@ -1,6 +1,7 @@
 import os, json
 from dotenv import load_dotenv
 from openai import OpenAI
+import time
 
 load_dotenv()
 client = OpenAI()
@@ -140,8 +141,39 @@ def judge(english, filipino, domain="general", reference=None, seed=123):
 
     if not data.get("overall_explanation"):
         data["overall_explanation"] = "; ".join(f"{k}: {data['explanations'][k]}" for k in keys)[:900]
+
+    if hasattr(r, "usage"):
+        data["token_usage"] = {
+            "prompt_tokens": r.usage.prompt_tokens,
+            "completion_tokens": r.usage.completion_tokens,
+            "total_tokens": r.usage.total_tokens
+        }
+    else:
+        data["token_usage"] = None  # If not available
+
+
     return data
 
 if __name__ == "__main__":
-    out = judge("This is a sample", "Ito ay isang sample", domain="medical")
+
+    source_text = """
+    The nurse inserted the IV incorrectly, causing bruising.
+    """
+    
+    translation = """
+    Ang nurse ay pinasok ang IV ng mali, kaya nagka-pasa.
+    """
+    start_time = time.time()
+    out = judge(source_text, translation, domain="medical")
+    latency = time.time() - start_time
+
     print(json.dumps(out, ensure_ascii=False, indent=2))
+
+    print(f"latency: {latency:.2f} seconds")
+
+    if out.get("token_usage"):
+        print(
+            f"Tokens → Prompt: {out['token_usage']['prompt_tokens']}, "
+            f"Completion: {out['token_usage']['completion_tokens']}, "
+            f"Total: {out['token_usage']['total_tokens']}"
+        )
