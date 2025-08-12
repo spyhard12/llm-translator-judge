@@ -2,6 +2,7 @@ import os, json
 from dotenv import load_dotenv
 from openai import OpenAI
 import time
+import pandas as pd 
 
 load_dotenv()
 client = OpenAI()
@@ -154,17 +155,46 @@ def judge(english, filipino, domain="general", reference=None, seed=123):
 
     return data
 
+def main():
+    # Path to your CSV file
+    csv_path = "test2.csv"
+    output_dir = "prompt_engineered_judge_results"
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Load CSV
+    df = pd.read_csv(csv_path)
+
+    # Loop through each row
+    for idx, row in df.iterrows():
+        english_text = row["English"]
+        filipino_text = row["Filipino"]
+
+        # Run your existing prompt_engineered_judge
+        result = judge(english_text, filipino_text)
+
+        # Save to a .json file (e.g., row_0.json, row_1.json)
+        output_path = os.path.join(output_dir, f"row_{idx}.json")
+        with open(output_path, "w", encoding="utf-8") as f:
+            json.dump(result, f, ensure_ascii=False, indent=2)
+
+        print(f"Processed row {idx} -> {output_path}")
+
 if __name__ == "__main__":
 
+    # For csv
+    main()
+
+    # uncomment for 1 text
+    '''
     source_text = """
-    The nurse inserted the IV incorrectly, causing bruising.
+    And, of course, a big thank you to the fans
     """
     
     translation = """
-    Ang nurse ay pinasok ang IV ng mali, kaya nagka-pasa.
+    At, syempre, malaking pasasalamat sa fans 
     """
     start_time = time.time()
-    out = judge(source_text, translation, domain="medical")
+    out = judge(source_text, translation)
     latency = time.time() - start_time
 
     print(json.dumps(out, ensure_ascii=False, indent=2))
@@ -177,3 +207,4 @@ if __name__ == "__main__":
             f"Completion: {out['token_usage']['completion_tokens']}, "
             f"Total: {out['token_usage']['total_tokens']}"
         )
+    '''

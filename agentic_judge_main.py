@@ -10,6 +10,8 @@ import os
 from dotenv import load_dotenv
 import time
 import re
+import pandas as pd
+
 
 load_dotenv() 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -215,8 +217,8 @@ class PlanningEngine:
             SCORING LOGIC:
             - Give **5/5 (Excellent)** if:
                 - The majority of criteria are 9–10, AND
-                - None are below 8, AND
-            - There are no critical accuracy or medical safety issues.
+                - None of the criteria are low, AND
+                - There are no critical accuracy or medical safety issues.
                 - Give **4/5 (Good)** if:
                 - One or two criteria are slightly lower (6–8) but others are strong, OR
                 - Quality is high but small non-critical issues exist.
@@ -709,7 +711,7 @@ class AgenticTranslationJudge:
         except Exception as e:
             logger.error(f"Failed to export evaluation: {e}")
 
-def main():
+def one_trial():
     
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
     judge = AgenticTranslationJudge(OPENAI_API_KEY)
@@ -741,5 +743,50 @@ def main():
     print(f"Latency: {latency:.2f} seconds")
     print(f"Tokens used: {TOTAL_TOKENS_USED}")
 
+def main():
+    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+    judge = AgenticTranslationJudge(OPENAI_API_KEY)
+
+    # Load CSV
+    csv_path = "test2.csv"
+    df = pd.read_csv(csv_path)
+
+    # Output folder
+    output_dir = "agentic_results"
+    os.makedirs(output_dir, exist_ok=True)
+
+    for idx, row in df.iterrows():
+        source_text = row["English"]
+        translation = row["Filipino"]
+
+        start_time = time.time()
+        result = judge.evaluate_translation(source_text, translation)
+        latency = time.time() - start_time
+
+
+        # File paths for this row
+        readable_path = os.path.join(output_dir, f"row_{idx}_evaluation.txt")
+        json_path = os.path.join(output_dir, f"row_{idx}_evaluation.json")
+
+        # Save readable text output
+        judge.pretty_print_evaluation(
+            result,
+            width=100,
+            show_thoughts_preview=True,
+            thought_preview_limit=30,
+            save_readable=True,
+            readable_filepath=readable_path
+        )
+
+        # Save JSON output
+        judge.export_evaluation(result, json_path)
+        print(f"Processed row {idx} -> {json_path} (Latency: {latency:.2f}s)")
+        print(f"Tokens used so far: {TOTAL_TOKENS_USED}")
+
 if __name__ == "__main__":
+
+    # for csv
     main()
+
+    # uncomment for 1 translation pair
+    # one_trial()
